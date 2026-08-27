@@ -26,6 +26,23 @@ st.markdown(
     [data-testid="stSidebarNav"] a:hover span {
         color: #7db0ff !important;
     }
+
+    /* Oculta la barra superior de Streamlit Cloud (Share, GitHub, editar,
+       etc.) para que los proveedores externos no vean ni puedan llegar
+       al código fuente. */
+    header[data-testid="stHeader"] {
+        visibility: hidden;
+        height: 0;
+    }
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    [data-testid="stToolbar"] {visibility: hidden;}
+    [data-testid="stDecoration"] {visibility: hidden;}
+    [data-testid="stStatusWidget"] {visibility: hidden;}
+    .stAppDeployButton {visibility: hidden;}
+    #GithubIcon {visibility: hidden;}
+    .viewerBadge_container__1QSob {display: none;}
+    .viewerBadge_link__1S137 {display: none;}
     </style>
     """,
     unsafe_allow_html=True,

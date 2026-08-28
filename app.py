@@ -27,12 +27,15 @@ st.markdown(
         color: #7db0ff !important;
     }
 
-    /* Oculta la barra superior de Streamlit Cloud (Share, GitHub, editar,
-       etc.) para que los proveedores externos no vean ni puedan llegar
-       al código fuente. */
+    /* Oculta los elementos de la barra superior de Streamlit Cloud (Share,
+       GitHub, editar, etc.) para que los proveedores externos no vean ni
+       puedan llegar al código fuente. Ojo: NO ocultamos el header completo,
+       porque ahí también vive el botón de abrir/cerrar el menú lateral
+       (colapsar/expandir) — si se oculta todo el header, ese botón deja de
+       verse y el usuario no puede volver a abrir el menú.
+    */
     header[data-testid="stHeader"] {
-        visibility: hidden;
-        height: 0;
+        background: transparent;
     }
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}

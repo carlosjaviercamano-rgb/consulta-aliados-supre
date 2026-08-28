@@ -39,13 +39,24 @@ st.markdown(
     }
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
-    [data-testid="stToolbar"] {visibility: hidden;}
     [data-testid="stDecoration"] {visibility: hidden;}
     [data-testid="stStatusWidget"] {visibility: hidden;}
     .stAppDeployButton {visibility: hidden;}
     #GithubIcon {visibility: hidden;}
     .viewerBadge_container__1QSob {display: none;}
     .viewerBadge_link__1S137 {display: none;}
+
+    /* El botón para reabrir el menú lateral vive dentro de stToolbar junto
+       con otros íconos que sí queremos ocultar (deploy, github, etc.).
+       En vez de ocultar todo stToolbar (lo que también tapaba este botón),
+       ocultamos stToolbar por defecto pero forzamos que ESTE control
+       específico se mantenga siempre visible. */
+    [data-testid="stToolbar"] {visibility: hidden;}
+    [data-testid="collapsedControl"] {
+        visibility: visible !important;
+        display: flex !important;
+        opacity: 1 !important;
+    }
     </style>
     """,
     unsafe_allow_html=True,

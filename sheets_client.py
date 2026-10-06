@@ -1,24 +1,29 @@
 """
-Cliente de Google Sheets para Consulta Aliados Supre.
-Centraliza la conexión y las operaciones de lectura/escritura sobre
-las hojas 'Facturas' y 'Proveedores'.
+Cliente de Google Sheets para el envío de facturas a aliados.
+Centraliza la conexión y las operaciones sobre las hojas 'Facturas' y 'Proveedores'.
+
+La hoja Facturas necesita una columna llamada 'estado_envio' (valores:
+'por enviar' / 'enviado') para controlar qué ya se mandó por correo.
 """
 
+import pandas as pd
 import streamlit as st
 import gspread
-import pandas as pd
 from google.oauth2.service_account import Credentials
+from gspread.utils import rowcol_to_a1
 
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive.readonly",
 ]
 
-# Nombres de las pestañas dentro del Google Sheet
 HOJA_FACTURAS = "Facturas"
 HOJA_PROVEEDORES = "Proveedores"
 
-# Columnas esperadas (deben coincidir con los encabezados reales del Sheet)
+COLUMNA_ESTADO = "estado_envio"
+ESTADO_POR_ENVIAR = "por enviar"
+ESTADO_ENVIADO = "enviado"
+
 COLUMNAS_FACTURAS = [
     "fecha_factura",
     "factura_comision",
@@ -28,9 +33,15 @@ COLUMNAS_FACTURAS = [
     "nit_aliado",
     "nombre_aliado",
     "validacion",
+    COLUMNA_ESTADO,
 ]
 
 COLUMNAS_PROVEEDORES = ["nit", "nombre", "correo", "fecha_alta"]
+
+# Estados posibles de un aliado en la revisión previa al envío
+ESTADO_LISTO = "Listo para enviar"
+ESTADO_SIN_PROVEEDOR = "Sin proveedor registrado"
+ESTADO_SIN_CORREO = "Sin correo válido"
 
 
 @st.cache_resource(show_spinner=False)
@@ -44,25 +55,33 @@ def get_client() -> gspread.Client:
 @st.cache_resource(show_spinner=False)
 def get_spreadsheet():
     """Abre el Google Sheet por su ID (guardado en secrets)."""
-    client = get_client()
-    sheet_id = st.secrets["google_sheet_id"]
-    return client.open_by_key(sheet_id)
+    return get_client().open_by_key(st.secrets["google_sheet_id"])
 
 
 def _worksheet(nombre_hoja: str):
-    ss = get_spreadsheet()
-    return ss.worksheet(nombre_hoja)
+    return get_spreadsheet().worksheet(nombre_hoja)
 
+
+def _encabezados_con_estado(ws) -> list[str]:
+    """Devuelve los encabezados de la hoja y exige que exista 'estado_envio'."""
+    encabezados = [h.strip() for h in ws.row_values(1)]
+    if COLUMNA_ESTADO not in encabezados:
+        raise RuntimeError(
+            f"Falta la columna '{COLUMNA_ESTADO}' en la hoja '{ws.title}'. "
+            f"Agrégala en la fila 1 (al final de los encabezados) y vuelve a intentar."
+        )
+    return encabezados
+
+
+# ---------- Lecturas ----------
 
 @st.cache_data(ttl=60, show_spinner=False)
 def cargar_facturas() -> pd.DataFrame:
     """Lee todas las facturas del Sheet como DataFrame."""
-    ws = _worksheet(HOJA_FACTURAS)
-    registros = ws.get_all_records()
+    registros = _worksheet(HOJA_FACTURAS).get_all_records(numericise_ignore=["all"])
     df = pd.DataFrame(registros)
     if df.empty:
         df = pd.DataFrame(columns=COLUMNAS_FACTURAS)
-    # Normaliza el NIT a texto sin espacios, para que el filtro por login sea exacto
     if "nit_aliado" in df.columns:
         df["nit_aliado"] = df["nit_aliado"].astype(str).str.strip()
     return df
@@ -71,34 +90,13 @@ def cargar_facturas() -> pd.DataFrame:
 @st.cache_data(ttl=60, show_spinner=False)
 def cargar_proveedores() -> pd.DataFrame:
     """Lee todos los proveedores registrados como DataFrame."""
-    ws = _worksheet(HOJA_PROVEEDORES)
-    registros = ws.get_all_records()
+    registros = _worksheet(HOJA_PROVEEDORES).get_all_records(numericise_ignore=["all"])
     df = pd.DataFrame(registros)
     if df.empty:
         df = pd.DataFrame(columns=COLUMNAS_PROVEEDORES)
     if "nit" in df.columns:
         df["nit"] = df["nit"].astype(str).str.strip()
     return df
-
-
-def validar_login(nit: str) -> dict | None:
-    """
-    Valida el login del proveedor. Usuario y contraseña son ambos el NIT.
-    Devuelve los datos del proveedor si el NIT existe, o None si no.
-    """
-    nit = str(nit).strip()
-    df = cargar_proveedores()
-    coincidencia = df[df["nit"] == nit]
-    if coincidencia.empty:
-        return None
-    return coincidencia.iloc[0].to_dict()
-
-
-def facturas_por_nit(nit: str) -> pd.DataFrame:
-    """Filtra las facturas correspondientes a un NIT específico."""
-    nit = str(nit).strip()
-    df = cargar_facturas()
-    return df[df["nit_aliado"] == nit].copy()
 
 
 def nit_existe(nit: str) -> bool:
@@ -113,28 +111,26 @@ def agregar_proveedor(nit: str, nombre: str, correo: str) -> None:
 
     ws = _worksheet(HOJA_PROVEEDORES)
     ws.append_row([str(nit).strip(), nombre.strip(), correo.strip(), date.today().isoformat()])
-    # Limpia la caché para que el nuevo proveedor se vea de inmediato
     cargar_proveedores.clear()
 
 
+# ---------- Carga masiva del CSV diario ----------
+
 def cargar_facturas_masivo(df_csv: pd.DataFrame) -> dict:
     """
-    Procesa un CSV de facturas diarias y las agrega a la hoja Facturas.
+    Procesa un CSV de facturas diarias y las agrega a la hoja Facturas
+    con estado 'por enviar'.
 
     Reglas:
-    - Filas SIN nit_aliado -> no se guardan (no hay con qué asociarlas).
-    - Filas con validacion = "Validar" -> tampoco se guardan, sin importar si
-      traen NIT o no. Muchas de estas traen por error la cédula del cliente
-      en el campo de NIT, así que guardarlas contaminaría los datos.
-    - Ambos casos anteriores van a 'por_revisar' para que se revisen y,
-      si corresponde, se corrijan y se vuelvan a subir.
-    - Filas cuya factura_comision ya existe -> se cuentan como duplicado, no se recrean.
-    - El resto (con NIT, sin "Validar") SÍ se guarda, exista o no ese proveedor
-      en Proveedores. Si el NIT aún no está registrado, se reporta aparte en
-      'nits_no_encontrados' solo de forma informativa, pero la factura ya
-      queda en el Sheet y aparecerá sola en cuanto el proveedor se registre.
+    - Filas SIN nit_aliado, o con validacion = "Validar" -> no se guardan
+      (van a 'por_revisar'; muchas traen la cédula del cliente en vez del NIT).
+    - Filas cuya factura_comision ya existe -> duplicado, no se recrean.
+    - Filas con NIT, exista o no ese proveedor en Proveedores -> SÍ se guardan.
+      Si el proveedor aún no está registrado se reporta en 'nits_no_encontrados';
+      la factura queda 'por enviar' y sale cuando se registre.
     """
     ws = _worksheet(HOJA_FACTURAS)
+    encabezados = _encabezados_con_estado(ws)
 
     existentes = set(cargar_facturas().get("factura_comision", pd.Series(dtype=str)).astype(str))
     nits_validos = set(cargar_proveedores().get("nit", pd.Series(dtype=str)).astype(str))
@@ -159,20 +155,22 @@ def cargar_facturas_masivo(df_csv: pd.DataFrame) -> dict:
 
         if nit not in nits_validos:
             filas_nit_no_encontrado.append(row.to_dict())
-            # No hacemos "continue": esta fila SÍ se guarda igual, solo se reporta.
 
-        filas_nuevas.append([
-            str(row.get("fecha_factura", "")),
-            factura,
-            str(row.get("cedula_cliente", "")),
-            str(row.get("nombre_cliente", "")),
-            str(row.get("factura_aliado", "")),
-            nit,
-            str(row.get("nombre_aliado", "")),
-            str(row.get("validacion", "")),
-        ])
+        valores = {
+            "fecha_factura": str(row.get("fecha_factura", "")),
+            "factura_comision": factura,
+            "cedula_cliente": str(row.get("cedula_cliente", "")),
+            "nombre_cliente": str(row.get("nombre_cliente", "")),
+            "factura_aliado": str(row.get("factura_aliado", "")),
+            "nit_aliado": nit,
+            "nombre_aliado": str(row.get("nombre_aliado", "")),
+            "validacion": str(row.get("validacion", "")),
+            COLUMNA_ESTADO: ESTADO_POR_ENVIAR,
+        }
+        # Se ordena según los encabezados reales del Sheet
+        filas_nuevas.append([valores.get(h, "") for h in encabezados])
         if factura:
-            existentes.add(factura)  # evita duplicados dentro del mismo archivo
+            existentes.add(factura)
 
     if filas_nuevas:
         ws.append_rows(filas_nuevas, value_input_option="USER_ENTERED")
@@ -187,26 +185,63 @@ def cargar_facturas_masivo(df_csv: pd.DataFrame) -> dict:
     }
 
 
-def obtener_pendientes_actuales() -> dict:
-    """
-    Revisa TODAS las facturas que hay hasta ahora en el Sheet (acumulado
-    histórico, no solo la última carga) y devuelve las que están sin NIT
-    o con un NIT que todavía no está registrado en Proveedores.
-    """
-    df = cargar_facturas()
-    nits_validos = set(cargar_proveedores().get("nit", pd.Series(dtype=str)).astype(str))
+# ---------- Envío de correos ----------
 
+def obtener_facturas_por_enviar() -> pd.DataFrame:
+    """
+    Lee el Sheet (sin caché, siempre fresco) y devuelve solo las facturas con
+    estado 'por enviar', con una columna '_fila' que indica su fila en el Sheet.
+    Las filas con el estado vacío (cargas anteriores a este cambio) se ignoran.
+    """
+    ws = _worksheet(HOJA_FACTURAS)
+    _encabezados_con_estado(ws)
+    df = pd.DataFrame(ws.get_all_records(numericise_ignore=["all"]))
     if df.empty:
-        vacio = pd.DataFrame(columns=COLUMNAS_FACTURAS)
-        return {"por_revisar": vacio, "nits_no_encontrados": vacio}
+        return pd.DataFrame(columns=COLUMNAS_FACTURAS + ["_fila"])
 
-    sin_nit = df[df["nit_aliado"].astype(str).str.strip() == ""]
-    con_nit_no_valido = df[
-        (df["nit_aliado"].astype(str).str.strip() != "")
-        & (~df["nit_aliado"].astype(str).str.strip().isin(nits_validos))
-    ]
+    df["_fila"] = df.index + 2  # fila 1 = encabezados
+    df["nit_aliado"] = df["nit_aliado"].astype(str).str.strip()
+    estado = df[COLUMNA_ESTADO].astype(str).str.strip().str.lower()
+    return df[estado == ESTADO_POR_ENVIAR].copy()
 
-    return {
-        "por_revisar": sin_nit,
-        "nits_no_encontrados": con_nit_no_valido,
-    }
+
+def preparar_envios(pendientes: pd.DataFrame, proveedores: pd.DataFrame) -> list[dict]:
+    """
+    Agrupa las facturas por enviar por NIT y determina, para cada aliado,
+    si se puede enviar (proveedor registrado y con correo válido).
+    """
+    prov_por_nit = {str(r["nit"]).strip(): r for _, r in proveedores.iterrows()}
+
+    envios = []
+    for nit, grupo in pendientes.groupby("nit_aliado"):
+        prov = prov_por_nit.get(nit)
+        if prov is None:
+            nombre = str(grupo["nombre_aliado"].iloc[0])
+            correo = ""
+            estado = ESTADO_SIN_PROVEEDOR
+        else:
+            nombre = str(prov["nombre"])
+            correo = str(prov["correo"]).strip()
+            estado = ESTADO_LISTO if "@" in correo else ESTADO_SIN_CORREO
+        envios.append({
+            "nit": nit,
+            "nombre": nombre,
+            "correo": correo,
+            "facturas": grupo,
+            "estado": estado,
+        })
+
+    return sorted(envios, key=lambda e: e["nombre"].lower())
+
+
+def marcar_enviadas(filas: list[int]) -> None:
+    """Pone estado 'enviado' en las filas indicadas, en una sola llamada."""
+    if not filas:
+        return
+    ws = _worksheet(HOJA_FACTURAS)
+    col = _encabezados_con_estado(ws).index(COLUMNA_ESTADO) + 1
+    ws.batch_update([
+        {"range": rowcol_to_a1(int(f), col), "values": [[ESTADO_ENVIADO]]}
+        for f in filas
+    ])
+    cargar_facturas.clear()

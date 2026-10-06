@@ -2,4 +2,4 @@ streamlit>=1.38
 gspread>=6.1
 google-auth>=2.34
 pandas>=2.2
-# smtplib y email vienen incluidos en la librería estándar de Python, no requieren instalación
+openpyxl>=3.1

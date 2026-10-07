@@ -9,7 +9,7 @@ import hashlib
 import pandas as pd
 import streamlit as st
 
-from email_client import enviar_correos_facturas
+from email_client import enviar_correos_facturas, limpiar_factura_aliado
 from sheets_client import (
     ESTADO_LISTO,
     agregar_proveedor,
@@ -56,6 +56,30 @@ COLUMNAS_ESPERADAS = [
     "nombre_aliado",
     "validacion",
 ]
+
+
+def _detalle_envio(envios: list[dict]) -> pd.DataFrame:
+    """
+    Facturas que se van a enviar, agrupadas por proveedor: primero todas las
+    de un proveedor una debajo de otra, luego las del siguiente.
+    Muestra el número de factura del aliado tal como llega en el Excel.
+    """
+    bloques = []
+    for e in envios:  # ya vienen ordenados por nombre de proveedor
+        f = e["facturas"].sort_values(["fecha_factura", "factura_comision"])
+        bloques.append(pd.DataFrame({
+            "Proveedor": e["nombre"],
+            "NIT": e["nit"],
+            "Fecha Factura": f["fecha_factura"].values,
+            "Factura Comisión": f["factura_comision"].values,
+            "Cédula Cliente": f["cedula_cliente"].values,
+            "Nombre Cliente": f["nombre_cliente"].values,
+            "Factura Aliado": [
+                limpiar_factura_aliado(a, c)
+                for a, c in zip(f["factura_aliado"], f["cedula_cliente"])
+            ],
+        }))
+    return pd.concat(bloques, ignore_index=True)
 
 
 def _token_admin() -> str:
@@ -247,7 +271,19 @@ if st.session_state.get("revisar_envio"):
                 "'por enviar' y saldrán la próxima vez, cuando los registres o corrijas su correo."
             )
 
-        if listos and st.button(f"Enviar {len(listos)} correos", type="primary"):
+        enviar_ahora = bool(listos) and st.button(
+            f"Enviar {len(listos)} correos", type="primary"
+        )
+
+        if listos:
+            st.subheader(
+                "Facturas incluidas en este envío" if enviar_ahora
+                else "Facturas que se van a enviar"
+            )
+            st.caption("Ordenadas por proveedor: las facturas de cada uno van seguidas.")
+            st.dataframe(_detalle_envio(listos), use_container_width=True, hide_index=True)
+
+        if enviar_ahora:
             with st.spinner("Enviando correos..."):
                 resultados = enviar_correos_facturas(listos)
 

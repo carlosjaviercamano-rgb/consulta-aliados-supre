@@ -26,9 +26,37 @@ COLUMNAS_EXCEL = {
 }
 
 
+def limpiar_factura_aliado(factura: str, cedula: str) -> str:
+    """
+    Quita del número de factura del aliado la cédula/NIT del cliente que viene
+    pegada al final (ej. 'FEV-12148-1000397021' -> 'FEV-12148').
+
+    1) Si termina en '-' + cedula_cliente, se quita exactamente eso.
+    2) Respaldo: si el último tramo tras el guion son 7 o más dígitos
+       (parece una cédula), también se quita.
+    Un número corto al final (ej. 'FEV-12148') no se toca.
+    """
+    factura = str(factura).strip()
+    cedula = str(cedula).strip()
+
+    if cedula and factura.endswith("-" + cedula):
+        return factura[: -(len(cedula) + 1)]
+
+    inicio, _, ultimo = factura.rpartition("-")
+    if inicio and ultimo.isdigit() and len(ultimo) >= 7:
+        return inicio
+
+    return factura
+
+
 def _excel_bytes(facturas: pd.DataFrame) -> bytes:
     """Arma el Excel del aliado (sin columnas internas como validacion o estado)."""
-    df = facturas[list(COLUMNAS_EXCEL)].rename(columns=COLUMNAS_EXCEL)
+    df = facturas[list(COLUMNAS_EXCEL)].copy()
+    df["factura_aliado"] = [
+        limpiar_factura_aliado(f, c)
+        for f, c in zip(df["factura_aliado"], df["cedula_cliente"])
+    ]
+    df = df.rename(columns=COLUMNAS_EXCEL)
     buffer = io.BytesIO()
     with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
         df.to_excel(writer, index=False, sheet_name="Facturas")

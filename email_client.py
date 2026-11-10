@@ -190,3 +190,137 @@ def enviar_correos_facturas(envios: list[dict]) -> dict:
         for envio in envios:
             resultados.setdefault(envio["nit"], (False, str(e)))
     return resultados
+
+
+# ---------- Soportes de pago a particulares ----------
+
+# Gmail admite ~25 MB por correo y los adjuntos crecen ~33% al codificarse,
+# así que se deja un margen: máximo ~18 MB de PDF por correo.
+LIMITE_BYTES_ADJUNTOS = 18 * 1024 * 1024
+
+
+def _armar_mensaje_soporte(remitente: str, cc: list[str], envio: dict) -> EmailMessage:
+    nombre = str(envio["nombre"]).strip()
+    identificacion = str(envio["identificacion"]).strip()
+    archivos = envio["archivos"]  # lista de {"nombre": str, "bytes": bytes}
+    total = len(archivos)
+    hoy = date.today()
+
+    msg = EmailMessage()
+    msg["Subject"] = f"Suprecredito | Soporte de pago de intereses | {hoy:%d/%m/%Y}"
+    msg["From"] = f"Suprecredito <{remitente}>"
+    msg["To"] = envio["correo"]
+    if cc:
+        msg["Cc"] = ", ".join(cc)
+
+    soporte = "el soporte" if total == 1 else "los soportes"
+    lista_txt = "\n".join(f"  - {a['nombre']}" for a in archivos)
+    msg.set_content(
+        f"Estimado(a) {nombre}:\n\n"
+        f"Reciba un cordial saludo de parte de Suprecredito.\n\n"
+        f"Adjuntamos {soporte} de pago de los intereses cancelados, "
+        f"para su conocimiento y control.\n\n"
+        f"  - Identificación: {identificacion}\n"
+        f"  - Número de soportes adjuntos: {total}\n\n"
+        f"Archivos adjuntos:\n{lista_txt}\n\n"
+        f"Si requiere alguna aclaración sobre la información, "
+        f"le agradecemos comunicarse con nosotros respondiendo a este mensaje.\n\n"
+        f"Cordialmente,\n\n"
+        f"Equipo Contable\n"
+        f"Suprecredito SAS\n"
+    )
+
+    lista_html = "".join(
+        f'<li style="margin:2px 0;">{html.escape(a["nombre"])}</li>' for a in archivos
+    )
+    html_cuerpo = f"""\
+<html>
+  <body style="margin:0; padding:0; background-color:#f4f6f8;">
+    <div style="max-width:620px; margin:0 auto; padding:24px; font-family:Arial, Helvetica, sans-serif; color:#1f2937; font-size:14px; line-height:1.6;">
+      <div style="background-color:#ffffff; border:1px solid #e5e7eb; border-radius:8px; overflow:hidden;">
+        <div style="background-color:#1e3a5f; color:#ffffff; padding:16px 24px; font-size:16px; font-weight:bold;">
+          Suprecredito
+        </div>
+        <div style="padding:24px;">
+          <p style="margin:0 0 14px 0;">Estimado(a) <strong>{html.escape(nombre)}</strong>:</p>
+          <p style="margin:0 0 14px 0;">Reciba un cordial saludo de parte de Suprecredito.</p>
+          <p style="margin:0 0 14px 0;">
+            Adjuntamos {soporte} de pago de los intereses cancelados, para su conocimiento y control.
+          </p>
+          <table style="border-collapse:collapse; margin:0 0 18px 0; width:100%;">
+            <tr>
+              <td style="padding:8px 12px; background-color:#f1f5f9; border:1px solid #e5e7eb; width:45%;"><strong>Identificación</strong></td>
+              <td style="padding:8px 12px; border:1px solid #e5e7eb;">{html.escape(identificacion)}</td>
+            </tr>
+            <tr>
+              <td style="padding:8px 12px; background-color:#f1f5f9; border:1px solid #e5e7eb;"><strong>Número de soportes adjuntos</strong></td>
+              <td style="padding:8px 12px; border:1px solid #e5e7eb;">{total}</td>
+            </tr>
+          </table>
+          <p style="margin:0 0 6px 0;"><strong>Archivos adjuntos:</strong></p>
+          <ul style="margin:0 0 16px 18px; padding:0;">{lista_html}</ul>
+          <p style="margin:0 0 14px 0;">
+            Si requiere alguna aclaración sobre la información, le agradecemos
+            comunicarse con nosotros respondiendo a este mensaje.
+          </p>
+          <p style="margin:24px 0 0 0;">Cordialmente,</p>
+          <p style="margin:12px 0 0 0;">
+            <strong>Equipo Contable</strong><br>
+            Suprecredito SAS
+          </p>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>
+"""
+    msg.add_alternative(html_cuerpo, subtype="html")
+
+    for a in archivos:
+        msg.add_attachment(
+            a["bytes"],
+            maintype="application",
+            subtype="pdf",
+            filename=a["nombre"],
+        )
+    return msg
+
+
+def enviar_soportes_particulares(envios: list[dict]) -> dict:
+    """
+    Envía un correo por particular, con todos sus PDF adjuntos, reutilizando
+    una sola conexión a Gmail. Cada envío debe traer: identificacion, nombre,
+    correo y archivos (lista de {"nombre", "bytes"}).
+    Devuelve {identificacion: (ok, mensaje_de_error)}.
+    """
+    try:
+        remitente = st.secrets["gmail_address"]
+        clave_app = st.secrets["gmail_app_password"]
+        cc = list(st.secrets.get("cc_emails", []))
+    except KeyError as e:
+        return {env["identificacion"]: (False, f"Falta configurar {e} en secrets") for env in envios}
+
+    resultados: dict = {}
+    try:
+        contexto = ssl.create_default_context()
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=contexto) as server:
+            server.login(remitente, clave_app)
+            for envio in envios:
+                ident = envio["identificacion"]
+                peso = sum(len(a["bytes"]) for a in envio["archivos"])
+                if peso > LIMITE_BYTES_ADJUNTOS:
+                    resultados[ident] = (
+                        False,
+                        f"Los adjuntos pesan {peso / 1024 / 1024:.1f} MB y superan el límite "
+                        f"de {LIMITE_BYTES_ADJUNTOS // 1024 // 1024} MB por correo.",
+                    )
+                    continue
+                try:
+                    server.send_message(_armar_mensaje_soporte(remitente, cc, envio))
+                    resultados[ident] = (True, "")
+                except Exception as e:
+                    resultados[ident] = (False, str(e))
+    except Exception as e:
+        for envio in envios:
+            resultados.setdefault(envio["identificacion"], (False, str(e)))
+    return resultados

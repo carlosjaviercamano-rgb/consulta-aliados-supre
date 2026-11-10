@@ -1,36 +1,30 @@
 """
-Aliados Supre — Envío de facturas por correo.
-Página única de administración: alta de proveedores, carga del CSV diario
-y envío de las facturas a cada aliado por correo (Excel adjunto).
+Supre Aliados — envío de facturas y soportes por correo.
+
+Punto de entrada: login de administrador, menú lateral de módulos y enrutador.
+  - Facturas Aliados:    modulo_facturas.py
+  - Soporte Particulares: modulo_particulares.py
 """
 
 import hashlib
 
-import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 
-from email_client import enviar_correos_facturas, limpiar_factura_aliado
-from sheets_client import (
-    ESTADO_LISTO,
-    agregar_proveedor,
-    cargar_facturas_masivo,
-    cargar_proveedores,
-    marcar_enviadas,
-    nit_existe,
-    obtener_facturas_por_enviar,
-    preparar_envios,
-)
+import modulo_facturas
+import modulo_particulares
 
 st.set_page_config(
-    page_title="Envío de facturas a aliados",
+    page_title="Supre Aliados",
     page_icon="📨",
     layout="wide",
+    initial_sidebar_state="expanded",
 )
 
-# Oculta los elementos de la barra de Streamlit Cloud (Share, GitHub, etc.)
 st.markdown(
     """
     <style>
+    /* Oculta la barra de Streamlit Cloud (Share, GitHub, etc.) */
     header[data-testid="stHeader"] {background: transparent;}
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
@@ -41,45 +35,59 @@ st.markdown(
     #GithubIcon {visibility: hidden;}
     .viewerBadge_container__1QSob {display: none;}
     .viewerBadge_link__1S137 {display: none;}
+
+    /* Menú lateral */
+    [data-testid="stSidebar"] {
+        background: #1a1f2e;
+        border-right: 1px solid #2d3548;
+    }
+    .sidebar-logo {
+        padding: 1rem 0.2rem 0.8rem 0.2rem;
+        border-bottom: 1px solid #2d3548;
+        margin-bottom: 0.8rem;
+    }
+    .sidebar-logo h2 {
+        color: #ffffff;
+        font-size: 1.1rem;
+        font-weight: 700;
+        margin: 0;
+    }
+    .sidebar-logo p {
+        color: #64748b;
+        font-size: 0.75rem;
+        margin: 0.2rem 0 0 0;
+    }
+    [data-testid="stSidebar"] button[kind="secondary"],
+    [data-testid="stSidebar"] [data-testid="stBaseButton-secondary"] {
+        background: #1e40af !important;
+        color: #ffffff !important;
+        border: 1px solid #1e40af !important;
+        border-radius: 8px !important;
+        font-weight: 600 !important;
+    }
+    [data-testid="stSidebar"] button[kind="secondary"]:hover,
+    [data-testid="stSidebar"] [data-testid="stBaseButton-secondary"]:hover {
+        background: #1d4ed8 !important;
+        border-color: #1d4ed8 !important;
+    }
+    /* Módulo activo */
+    [data-testid="stSidebar"] button[kind="primary"],
+    [data-testid="stSidebar"] [data-testid="stBaseButton-primary"] {
+        background: #2563eb !important;
+        color: #ffffff !important;
+        border: 2px solid #93c5fd !important;
+        border-radius: 8px !important;
+        font-weight: 700 !important;
+    }
     </style>
     """,
     unsafe_allow_html=True,
 )
 
-COLUMNAS_ESPERADAS = [
-    "fecha_factura",
-    "factura_comision",
-    "cedula_cliente",
-    "nombre_cliente",
-    "factura_aliado",
-    "nit_aliado",
-    "nombre_aliado",
-    "validacion",
+MODULOS = [
+    ("facturas", "📨", "Facturas Aliados"),
+    ("particulares", "📎", "Soporte Particulares"),
 ]
-
-
-def _detalle_envio(envios: list[dict]) -> pd.DataFrame:
-    """
-    Facturas que se van a enviar, agrupadas por proveedor: primero todas las
-    de un proveedor una debajo de otra, luego las del siguiente.
-    Muestra el número de factura del aliado tal como llega en el Excel.
-    """
-    bloques = []
-    for e in envios:  # ya vienen ordenados por nombre de proveedor
-        f = e["facturas"].sort_values(["fecha_factura", "factura_comision"])
-        bloques.append(pd.DataFrame({
-            "Proveedor": e["nombre"],
-            "NIT": e["nit"],
-            "Fecha Factura": f["fecha_factura"].values,
-            "Factura Comisión": f["factura_comision"].values,
-            "Cédula Cliente": f["cedula_cliente"].values,
-            "Nombre Cliente": f["nombre_cliente"].values,
-            "Factura Aliado": [
-                limpiar_factura_aliado(a, c)
-                for a, c in zip(f["factura_aliado"], f["cedula_cliente"])
-            ],
-        }))
-    return pd.concat(bloques, ignore_index=True)
 
 
 def _token_admin() -> str:
@@ -87,8 +95,6 @@ def _token_admin() -> str:
     admin_password = st.secrets.get("admin_password", "")
     return hashlib.sha256(admin_password.encode()).hexdigest()[:16]
 
-
-st.title("📨 Envío de facturas a aliados")
 
 # ---------- Autenticación de administrador ----------
 if "admin_autenticado" not in st.session_state:
@@ -99,6 +105,7 @@ if not st.session_state.admin_autenticado and st.query_params.get("admin_token")
     st.session_state.admin_autenticado = True
 
 if not st.session_state.admin_autenticado:
+    st.title("🏦 Supre Aliados")
     clave = st.text_input("Contraseña de administrador", type="password")
     if st.button("Ingresar"):
         if clave == st.secrets.get("admin_password", ""):
@@ -112,207 +119,85 @@ if not st.session_state.admin_autenticado:
 
 def _cerrar_sesion_admin():
     st.session_state.admin_autenticado = False
-    st.session_state.pop("revisar_envio", None)
+    for clave in list(st.session_state.keys()):
+        if clave.startswith("soportes") or clave == "revisar_envio":
+            del st.session_state[clave]
     if "admin_token" in st.query_params:
         del st.query_params["admin_token"]
 
 
-col_estado, col_logout = st.columns([5, 1])
-with col_estado:
-    st.success("Sesión de administrador activa.")
-with col_logout:
-    st.button("Cerrar sesión", on_click=_cerrar_sesion_admin, use_container_width=True)
+if "modulo" not in st.session_state:
+    st.session_state.modulo = "facturas"
 
-# =====================================================================
-# 1. ALTA DE PROVEEDORES
-# =====================================================================
-st.header("1. Proveedores")
-
-with st.form("alta_proveedor", clear_on_submit=True):
-    st.subheader("Nuevo proveedor")
-    nombre = st.text_input("Nombre completo / Razón social")
-    correo = st.text_input("Correo electrónico (aquí recibirá las facturas)")
-    nit = st.text_input("NIT")
-    enviar_alta = st.form_submit_button("Dar de alta")
-
-if enviar_alta:
-    if not (nombre and correo and nit):
-        st.error("Todos los campos son obligatorios.")
-    elif "@" not in correo:
-        st.error("El correo no parece válido.")
-    elif nit_existe(nit):
-        st.warning(f"El NIT {nit} ya está registrado. No se creó un duplicado.")
-    else:
-        agregar_proveedor(nit=nit, nombre=nombre, correo=correo)
-        st.success(f"Proveedor '{nombre}' (NIT {nit}) registrado correctamente.")
-
-st.subheader("Proveedores registrados")
-st.dataframe(cargar_proveedores(), use_container_width=True, hide_index=True)
-
-# =====================================================================
-# 2. CARGA MASIVA DEL CSV
-# =====================================================================
-st.divider()
-st.header("2. Cargar facturas (CSV diario)")
-st.caption(
-    "Sube el reporte descargado de AWS. Las facturas nuevas quedan como 'por enviar'. "
-    "Columnas requeridas: " + ", ".join(f"`{c}`" for c in COLUMNAS_ESPERADAS)
-)
-
-archivo = st.file_uploader("Archivo CSV", type=["csv"])
-
-if archivo is not None:
-    try:
-        df_csv = pd.read_csv(archivo, dtype=str).fillna("")
-    except Exception as e:
-        st.error(f"No se pudo leer el archivo: {e}")
-        df_csv = None
-
-    if df_csv is not None:
-        faltantes = [c for c in COLUMNAS_ESPERADAS if c not in df_csv.columns]
-        if faltantes:
-            st.error(f"Al archivo le faltan estas columnas: {', '.join(faltantes)}")
-        else:
-            st.write(f"Se detectaron **{len(df_csv)}** filas en el archivo.")
-            if st.button("Procesar carga", type="primary"):
-                try:
-                    with st.spinner("Procesando y escribiendo en el Google Sheet..."):
-                        resumen = cargar_facturas_masivo(df_csv)
-                except RuntimeError as e:
-                    st.error(str(e))
-                else:
-                    st.success("Carga procesada. Las facturas nuevas quedaron como 'por enviar'.")
-
-                    c1, c2, c3, c4 = st.columns(4)
-                    c1.metric("Total filas", resumen["total"])
-                    c2.metric("Cargadas (por enviar)", resumen["cargadas"])
-                    c3.metric("Duplicadas (omitidas)", resumen["duplicados"])
-                    c4.metric("No guardadas (por revisar)", len(resumen["por_revisar"]))
-
-                    if not resumen["por_revisar"].empty:
-                        st.warning(
-                            f"{len(resumen['por_revisar'])} filas no se guardaron (sin NIT, o "
-                            f"marcadas como 'Validar' porque suelen traer la cédula del cliente "
-                            f"en vez del NIT real). Revísalas y, si corresponde, corrígelas y "
-                            f"vuelve a subir el archivo."
-                        )
-                        st.dataframe(resumen["por_revisar"], use_container_width=True, hide_index=True)
-                        st.download_button(
-                            "Descargar filas por revisar (CSV)",
-                            data=resumen["por_revisar"].to_csv(index=False).encode("utf-8-sig"),
-                            file_name="por_revisar.csv",
-                            mime="text/csv",
-                        )
-
-                    if not resumen["nits_no_encontrados"].empty:
-                        st.info(
-                            f"{len(resumen['nits_no_encontrados'])} facturas son de NITs que aún no "
-                            f"están registrados como proveedor. Quedaron guardadas como 'por enviar' "
-                            f"y saldrán cuando registres al proveedor y envíes los correos."
-                        )
-                        st.dataframe(resumen["nits_no_encontrados"], use_container_width=True, hide_index=True)
-                        st.download_button(
-                            "Descargar filas con NIT no registrado (CSV)",
-                            data=resumen["nits_no_encontrados"].to_csv(index=False).encode("utf-8-sig"),
-                            file_name="nit_no_registrado.csv",
-                            mime="text/csv",
-                        )
-
-# =====================================================================
-# 3. ENVÍO DE CORREOS
-# =====================================================================
-st.divider()
-st.header("3. Enviar facturas a los aliados")
-st.caption(
-    "Revisa qué se va a enviar antes de mandar nada. Cada aliado recibe un correo con un "
-    "Excel adjunto con sus facturas 'por enviar'; luego esas facturas pasan a 'enviado'."
-)
-
-if st.button("Revisar pendientes de envío"):
-    st.session_state.revisar_envio = True
-
-if st.session_state.get("revisar_envio"):
-    try:
-        pendientes = obtener_facturas_por_enviar()
-    except RuntimeError as e:
-        st.error(str(e))
-        st.stop()
-
-    if pendientes.empty:
-        st.success("No hay facturas por enviar. 🎉")
-    else:
-        envios = preparar_envios(pendientes, cargar_proveedores())
-        listos = [e for e in envios if e["estado"] == ESTADO_LISTO]
-        bloqueados = [e for e in envios if e["estado"] != ESTADO_LISTO]
-
-        m1, m2, m3 = st.columns(3)
-        m1.metric("Facturas por enviar", len(pendientes))
-        m2.metric("Correos listos", len(listos))
-        m3.metric("Aliados bloqueados", len(bloqueados))
-
-        st.dataframe(
-            pd.DataFrame([
-                {
-                    "NIT": e["nit"],
-                    "Aliado": e["nombre"],
-                    "Correo": e["correo"],
-                    "Facturas": len(e["facturas"]),
-                    "Estado": e["estado"],
-                }
-                for e in envios
-            ]),
+# ---------- Menú lateral ----------
+with st.sidebar:
+    st.markdown(
+        '<div class="sidebar-logo"><h2>🏦 Supre Aliados</h2>'
+        "<p>Facturas y soportes por correo</p></div>",
+        unsafe_allow_html=True,
+    )
+    st.caption("👤 Administrador")
+    st.button("🚪 Cerrar sesión", on_click=_cerrar_sesion_admin, use_container_width=True)
+    st.markdown("---")
+    st.markdown("**MÓDULOS**")
+    for clave, icono, etiqueta in MODULOS:
+        activo = st.session_state.modulo == clave
+        if st.button(
+            f"{icono}  {etiqueta}",
+            key=f"nav_{clave}",
             use_container_width=True,
-            hide_index=True,
-        )
+            type="primary" if activo else "secondary",
+        ):
+            st.session_state.modulo = clave
+            st.rerun()
 
-        if bloqueados:
-            st.warning(
-                "Los aliados bloqueados no recibirán correo ahora; sus facturas siguen "
-                "'por enviar' y saldrán la próxima vez, cuando los registres o corrijas su correo."
-            )
+# Botón flotante para abrir/cerrar el menú lateral: como la barra de Streamlit
+# está oculta, este botón dispara por JavaScript el control nativo del sidebar.
+components.html(
+    """
+    <script>
+    (function() {
+        function crearBotonFlotante() {
+            var doc = window.parent.document;
+            if (doc.getElementById('aliados-toggle-sidebar')) return;
 
-        enviar_ahora = bool(listos) and st.button(
-            f"Enviar {len(listos)} correos", type="primary"
-        )
+            var btn = doc.createElement('button');
+            btn.id = 'aliados-toggle-sidebar';
+            btn.innerHTML = '&#9776;';
+            btn.style.position = 'fixed';
+            btn.style.top = '0.6rem';
+            btn.style.left = '0.6rem';
+            btn.style.zIndex = '999999';
+            btn.style.background = '#1c1f26';
+            btn.style.color = '#ffffff';
+            btn.style.border = '1px solid #2d3548';
+            btn.style.borderRadius = '6px';
+            btn.style.padding = '0.35rem 0.6rem';
+            btn.style.fontSize = '1rem';
+            btn.style.cursor = 'pointer';
+            btn.title = 'Mostrar / ocultar menú';
 
-        if listos:
-            st.subheader(
-                "Facturas incluidas en este envío" if enviar_ahora
-                else "Facturas que se van a enviar"
-            )
-            st.caption("Ordenadas por proveedor: las facturas de cada uno van seguidas.")
-            st.dataframe(_detalle_envio(listos), use_container_width=True, hide_index=True)
+            btn.onclick = function() {
+                var nativo = doc.querySelector('[data-testid="collapsedControl"] button')
+                          || doc.querySelector('[data-testid="stSidebarCollapseButton"] button')
+                          || doc.querySelector('[data-testid="collapsedControl"]')
+                          || doc.querySelector('[data-testid="stSidebarCollapseButton"]');
+                if (nativo) { nativo.click(); }
+            };
 
-        if enviar_ahora:
-            with st.spinner("Enviando correos..."):
-                resultados = enviar_correos_facturas(listos)
+            doc.body.appendChild(btn);
+        }
 
-            ok = [e for e in listos if resultados[e["nit"]][0]]
-            fallidos = [e for e in listos if not resultados[e["nit"]][0]]
+        crearBotonFlotante();
+        setInterval(crearBotonFlotante, 1000);
+    })();
+    </script>
+    """,
+    height=0,
+)
 
-            # Marca como 'enviado' solo lo que realmente salió
-            filas_ok = [int(f) for e in ok for f in e["facturas"]["_fila"]]
-            try:
-                marcar_enviadas(filas_ok)
-            except Exception as e:
-                st.error(
-                    f"Los correos se enviaron, pero NO se pudo marcar las facturas como "
-                    f"'enviado' en el Sheet ({e}). Márcalas manualmente para evitar reenvíos."
-                )
-
-            r1, r2 = st.columns(2)
-            r1.metric("Correos enviados", len(ok))
-            r2.metric("Correos fallidos", len(fallidos))
-
-            if ok:
-                st.success(f"Se enviaron {len(ok)} correos y sus facturas quedaron como 'enviado'.")
-            if fallidos:
-                st.error("Estos correos fallaron; sus facturas siguen 'por enviar':")
-                st.dataframe(
-                    pd.DataFrame([
-                        {"NIT": e["nit"], "Aliado": e["nombre"], "Error": resultados[e["nit"]][1]}
-                        for e in fallidos
-                    ]),
-                    use_container_width=True,
-                    hide_index=True,
-                )
+# ---------- Enrutador ----------
+if st.session_state.modulo == "particulares":
+    modulo_particulares.render()
+else:
+    modulo_facturas.render()

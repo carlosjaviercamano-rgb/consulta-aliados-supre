@@ -245,3 +245,46 @@ def marcar_enviadas(filas: list[int]) -> None:
         for f in filas
     ])
     cargar_facturas.clear()
+
+
+# ---------- Particulares (módulo Soporte Particulares) ----------
+
+HOJA_PARTICULARES = "Particulares"
+COLUMNAS_PARTICULARES = ["identificacion", "nombre", "correo", "fecha_alta"]
+
+
+def _hoja_particulares():
+    """Devuelve la hoja 'Particulares'; si no existe, la crea con sus encabezados."""
+    ss = get_spreadsheet()
+    try:
+        return ss.worksheet(HOJA_PARTICULARES)
+    except gspread.exceptions.WorksheetNotFound:
+        ws = ss.add_worksheet(title=HOJA_PARTICULARES, rows=200, cols=len(COLUMNAS_PARTICULARES))
+        ws.append_row(COLUMNAS_PARTICULARES)
+        return ws
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def cargar_particulares() -> pd.DataFrame:
+    """Lee los particulares registrados como DataFrame."""
+    registros = _hoja_particulares().get_all_records(numericise_ignore=["all"])
+    df = pd.DataFrame(registros)
+    if df.empty:
+        df = pd.DataFrame(columns=COLUMNAS_PARTICULARES)
+    df["identificacion"] = df["identificacion"].astype(str).str.strip()
+    return df
+
+
+def particular_existe(identificacion: str) -> bool:
+    identificacion = str(identificacion).strip()
+    df = cargar_particulares()
+    return not df[df["identificacion"] == identificacion].empty
+
+
+def agregar_particular(identificacion: str, nombre: str, correo: str) -> None:
+    """Agrega un particular a la hoja 'Particulares'."""
+    from datetime import date
+
+    ws = _hoja_particulares()
+    ws.append_row([str(identificacion).strip(), nombre.strip(), correo.strip(), date.today().isoformat()])
+    cargar_particulares.clear()

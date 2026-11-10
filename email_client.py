@@ -199,6 +199,27 @@ def enviar_correos_facturas(envios: list[dict]) -> dict:
 LIMITE_BYTES_ADJUNTOS = 18 * 1024 * 1024
 
 
+MESES_ES = {
+    1: "Enero", 2: "Febrero", 3: "Marzo", 4: "Abril", 5: "Mayo", 6: "Junio",
+    7: "Julio", 8: "Agosto", 9: "Septiembre", 10: "Octubre", 11: "Noviembre", 12: "Diciembre",
+}
+
+
+def _frase_meses(archivos: list[dict]) -> str:
+    """
+    Frase con el/los mes(es) de los soportes, lista para insertar en el correo:
+    ' correspondientes al mes de octubre' / ' correspondientes a los meses de
+    enero y febrero'. Si los archivos no traen mes, devuelve ''.
+    """
+    meses = sorted({a["mes"] for a in archivos if a.get("mes") in MESES_ES})
+    nombres = [MESES_ES[m].lower() for m in meses]
+    if not nombres:
+        return ""
+    if len(nombres) == 1:
+        return f" correspondientes al mes de {nombres[0]}"
+    return " correspondientes a los meses de " + ", ".join(nombres[:-1]) + " y " + nombres[-1]
+
+
 def _armar_mensaje_soporte(remitente: str, cc: list[str], envio: dict) -> EmailMessage:
     nombre = str(envio["nombre"]).strip()
     identificacion = str(envio["identificacion"]).strip()
@@ -214,11 +235,12 @@ def _armar_mensaje_soporte(remitente: str, cc: list[str], envio: dict) -> EmailM
         msg["Cc"] = ", ".join(cc)
 
     soporte = "el soporte" if total == 1 else "los soportes"
+    frase_meses = _frase_meses(archivos)
     lista_txt = "\n".join(f"  - {a['nombre']}" for a in archivos)
     msg.set_content(
         f"Estimado(a) {nombre}:\n\n"
         f"Reciba un cordial saludo de parte de Suprecredito.\n\n"
-        f"Adjuntamos {soporte} de pago de los intereses cancelados, "
+        f"Adjuntamos {soporte} de pago de los intereses cancelados{frase_meses}, "
         f"para su conocimiento y control.\n\n"
         f"  - Identificación: {identificacion}\n"
         f"  - Número de soportes adjuntos: {total}\n\n"
@@ -245,7 +267,7 @@ def _armar_mensaje_soporte(remitente: str, cc: list[str], envio: dict) -> EmailM
           <p style="margin:0 0 14px 0;">Estimado(a) <strong>{html.escape(nombre)}</strong>:</p>
           <p style="margin:0 0 14px 0;">Reciba un cordial saludo de parte de Suprecredito.</p>
           <p style="margin:0 0 14px 0;">
-            Adjuntamos {soporte} de pago de los intereses cancelados, para su conocimiento y control.
+            Adjuntamos {soporte} de pago de los intereses cancelados{frase_meses}, para su conocimiento y control.
           </p>
           <table style="border-collapse:collapse; margin:0 0 18px 0; width:100%;">
             <tr>

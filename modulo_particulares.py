@@ -13,7 +13,7 @@ import re
 import pandas as pd
 import streamlit as st
 
-from email_client import LIMITE_BYTES_ADJUNTOS, enviar_soportes_particulares
+from email_client import LIMITE_BYTES_ADJUNTOS, MESES_ES, enviar_soportes_particulares
 from sheets_client import (
     ESTADO_LISTO,
     agregar_particular,
@@ -96,6 +96,7 @@ def _adjuntar_y_enviar():
     ss = st.session_state
     ss.setdefault("soportes", {})  # {identificacion: [{"nombre": str, "bytes": bytes}, ...]}
     ss.setdefault("soportes_uploader_n", 0)
+    ss.setdefault("soportes_sel_n", 0)
 
     _mostrar_mensajes_previos()
 
@@ -113,7 +114,21 @@ def _adjuntar_y_enviar():
         "Elige el particular, sube sus PDF (puedes subir varios) y agrégalos a la lista. "
         "Repite con cada particular. La lista se conserva mientras no recargues la página."
     )
-    elegido = st.selectbox("Particular", list(opciones), key="soportes_particular")
+    mes = st.selectbox(
+        "Mes al que corresponden los intereses",
+        list(range(1, 13)),
+        index=None,
+        format_func=lambda m: MESES_ES[m],
+        placeholder="Selecciona el mes",
+        key="soportes_mes",
+    )
+    elegido = st.selectbox(
+        "Particular",
+        list(opciones),
+        index=None,
+        placeholder="Selecciona un particular",
+        key=f"soportes_particular_{ss.soportes_sel_n}",
+    )
     archivos = st.file_uploader(
         "PDF del soporte de pago",
         type=["pdf"],
@@ -121,7 +136,11 @@ def _adjuntar_y_enviar():
         key=f"soportes_uploader_{ss.soportes_uploader_n}",
     )
 
-    if st.button("Agregar a la lista", disabled=not archivos):
+    listo_para_agregar = bool(archivos) and mes is not None and elegido is not None
+    if archivos and not listo_para_agregar:
+        st.caption("Elige el mes y el particular para poder agregar los PDF.")
+
+    if st.button("Agregar a la lista", disabled=not listo_para_agregar):
         ident = opciones[elegido]
         lista = ss.soportes.setdefault(ident, [])
         existentes = {(a["nombre"], len(a["bytes"])) for a in lista}
@@ -131,11 +150,12 @@ def _adjuntar_y_enviar():
             if (f.name, len(contenido)) in existentes:
                 repetidos.append(f.name)
                 continue
-            lista.append({"nombre": f.name, "bytes": contenido})
+            lista.append({"nombre": f.name, "bytes": contenido, "mes": mes})
             existentes.add((f.name, len(contenido)))
         if repetidos:
             ss.soportes_aviso = "Ya estaban en la lista y no se agregaron de nuevo: " + ", ".join(repetidos)
         ss.soportes_uploader_n += 1  # limpia el cargador de archivos
+        ss.soportes_sel_n += 1  # deja el particular en blanco otra vez (el mes se conserva)
         st.rerun()
 
     # ---------- 2. Lista de envío ----------
@@ -167,6 +187,7 @@ def _adjuntar_y_enviar():
             "Particular": nombre,
             "Identificación": ident,
             "Correo": correo,
+            "Mes": ", ".join(MESES_ES[m] for m in sorted({a["mes"] for a in lista if a.get("mes")})),
             "Soportes": len(lista),
             "Peso (MB)": round(peso / 1024 / 1024, 2),
             "Estado": estado,
@@ -192,7 +213,7 @@ def _adjuntar_y_enviar():
         with st.expander(etiqueta):
             for i, a in enumerate(lista):
                 c1, c2 = st.columns([6, 1])
-                c1.write(f"📄 {a['nombre']}  ·  {len(a['bytes']) / 1024:.0f} KB")
+                c1.write(f"📄 {a['nombre']}  ·  {MESES_ES.get(a.get('mes'), 'sin mes')}  ·  {len(a['bytes']) / 1024:.0f} KB")
                 if c2.button("Quitar", key=f"quitar_{ident}_{i}"):
                     lista.pop(i)
                     if not lista:

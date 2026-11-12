@@ -13,11 +13,13 @@ from sheets_client import (
     cargar_facturas_masivo,
     cargar_proveedores,
     marcar_enviadas,
+    actualizar_proveedor,
     nit_existe,
+    obtener_proveedor,
     obtener_facturas_por_enviar,
     preparar_envios,
 )
-from ui import encabezado
+from ui import editor_registro, encabezado
 
 COLUMNAS_ESPERADAS = [
     "fecha_factura",
@@ -63,23 +65,41 @@ def render():
     # =====================================================================
     st.header("1. Proveedores")
 
-    with st.form("alta_proveedor", clear_on_submit=True):
-        st.subheader("Nuevo proveedor")
-        nombre = st.text_input("Nombre completo / Razón social")
-        correo = st.text_input("Correo electrónico (aquí recibirá las facturas)")
-        nit = st.text_input("NIT")
-        enviar_alta = st.form_submit_button("Dar de alta")
+    accion = st.radio(
+        "¿Qué deseas hacer?",
+        ["Nuevo proveedor", "Editar proveedor"],
+        horizontal=True,
+        key="prov_accion",
+    )
 
-    if enviar_alta:
-        if not (nombre and correo and nit):
-            st.error("Todos los campos son obligatorios.")
-        elif "@" not in correo:
-            st.error("El correo no parece válido.")
-        elif nit_existe(nit):
-            st.warning(f"El NIT {nit} ya está registrado. No se creó un duplicado.")
-        else:
-            agregar_proveedor(nit=nit, nombre=nombre, correo=correo)
-            st.success(f"Proveedor '{nombre}' (NIT {nit}) registrado correctamente.")
+    if accion == "Nuevo proveedor":
+        with st.form("alta_proveedor", clear_on_submit=True):
+            st.subheader("Nuevo proveedor")
+            nombre = st.text_input("Nombre completo / Razón social")
+            correo = st.text_input("Correo electrónico (aquí recibirá las facturas)")
+            nit = st.text_input("NIT")
+            enviar_alta = st.form_submit_button("Dar de alta")
+
+        if enviar_alta:
+            if not (nombre and correo and nit):
+                st.error("Todos los campos son obligatorios.")
+            elif "@" not in correo:
+                st.error("El correo no parece válido.")
+            elif nit_existe(nit):
+                st.warning(f"El NIT {nit} ya está registrado. No se creó un duplicado.")
+            else:
+                agregar_proveedor(nit=nit, nombre=nombre, correo=correo)
+                st.success(f"Proveedor '{nombre}' (NIT {nit}) registrado correctamente.")
+
+    else:
+        editor_registro(
+            prefijo="prov",
+            etiqueta_busqueda="NIT del proveedor a editar",
+            etiqueta_id="NIT",
+            etiqueta_nombre="Nombre completo / Razón social",
+            obtener=obtener_proveedor,
+            actualizar=actualizar_proveedor,
+        )
 
     st.subheader("Proveedores registrados")
     st.dataframe(cargar_proveedores(), use_container_width=True, hide_index=True)

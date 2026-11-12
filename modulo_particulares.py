@@ -16,11 +16,13 @@ import streamlit as st
 from email_client import LIMITE_BYTES_ADJUNTOS, MESES_ES, enviar_soportes_particulares
 from sheets_client import (
     ESTADO_LISTO,
+    actualizar_particular,
     agregar_particular,
     cargar_particulares,
+    obtener_particular,
     particular_existe,
 )
-from ui import encabezado
+from ui import editor_registro, encabezado
 
 _REGEX_CORREO = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 _LIMITE_MB = LIMITE_BYTES_ADJUNTOS // 1024 // 1024
@@ -47,23 +49,41 @@ def render():
 # Acta de particulares
 # =====================================================================
 def _acta():
-    with st.form("alta_particular", clear_on_submit=True):
-        st.subheader("Nuevo particular")
-        nombre = st.text_input("Nombre completo")
-        identificacion = st.text_input("Identificación (cédula o NIT)")
-        correo = st.text_input("Correo electrónico (aquí recibirá los soportes)")
-        enviar_alta = st.form_submit_button("Dar de alta")
+    accion = st.radio(
+        "¿Qué deseas hacer?",
+        ["Nuevo particular", "Editar particular"],
+        horizontal=True,
+        key="part_accion",
+    )
 
-    if enviar_alta:
-        if not (nombre.strip() and identificacion.strip() and correo.strip()):
-            st.error("Todos los campos son obligatorios.")
-        elif not _correo_valido(correo):
-            st.error("El correo no parece válido.")
-        elif particular_existe(identificacion):
-            st.warning(f"La identificación {identificacion} ya está registrada. No se creó un duplicado.")
-        else:
-            agregar_particular(identificacion=identificacion, nombre=nombre, correo=correo)
-            st.success(f"Particular '{nombre.strip()}' ({identificacion.strip()}) registrado correctamente.")
+    if accion == "Nuevo particular":
+        with st.form("alta_particular", clear_on_submit=True):
+            st.subheader("Nuevo particular")
+            nombre = st.text_input("Nombre completo")
+            identificacion = st.text_input("Identificación (cédula o NIT)")
+            correo = st.text_input("Correo electrónico (aquí recibirá los soportes)")
+            enviar_alta = st.form_submit_button("Dar de alta")
+
+        if enviar_alta:
+            if not (nombre.strip() and identificacion.strip() and correo.strip()):
+                st.error("Todos los campos son obligatorios.")
+            elif not _correo_valido(correo):
+                st.error("El correo no parece válido.")
+            elif particular_existe(identificacion):
+                st.warning(f"La identificación {identificacion} ya está registrada. No se creó un duplicado.")
+            else:
+                agregar_particular(identificacion=identificacion, nombre=nombre, correo=correo)
+                st.success(f"Particular '{nombre.strip()}' ({identificacion.strip()}) registrado correctamente.")
+
+    else:
+        editor_registro(
+            prefijo="part",
+            etiqueta_busqueda="Identificación del particular a editar",
+            etiqueta_id="identificación",
+            etiqueta_nombre="Nombre completo",
+            obtener=obtener_particular,
+            actualizar=actualizar_particular,
+        )
 
     st.subheader("Particulares registrados")
     st.dataframe(cargar_particulares(), use_container_width=True, hide_index=True)

@@ -288,3 +288,64 @@ def agregar_particular(identificacion: str, nombre: str, correo: str) -> None:
     ws = _hoja_particulares()
     ws.append_row([str(identificacion).strip(), nombre.strip(), correo.strip(), date.today().isoformat()])
     cargar_particulares.clear()
+
+
+# ---------- Edición de proveedores y particulares ----------
+
+def _registro_por_clave(ws, columna_clave: str, valor: str) -> dict | None:
+    """Lee la hoja (sin caché) y devuelve la fila cuya columna clave coincide, o None."""
+    valor = str(valor).strip()
+    for registro in ws.get_all_records(numericise_ignore=["all"]):
+        if str(registro.get(columna_clave, "")).strip() == valor:
+            return registro
+    return None
+
+
+def _actualizar_fila(ws, columna_clave: str, valor: str, cambios: dict) -> None:
+    """
+    Actualiza columnas de la fila cuya columna clave vale `valor`.
+    Las columnas se ubican por su encabezado. Lanza LookupError si no existe la fila.
+    """
+    encabezados = [h.strip() for h in ws.row_values(1)]
+    for columna in (columna_clave, *cambios):
+        if columna not in encabezados:
+            raise RuntimeError(f"Falta la columna '{columna}' en la hoja '{ws.title}'.")
+
+    valor = str(valor).strip()
+    claves = [str(v).strip() for v in ws.col_values(encabezados.index(columna_clave) + 1)]
+    fila = next((i for i, v in enumerate(claves[1:], start=2) if v == valor), None)
+    if fila is None:
+        raise LookupError(f"No se encontró '{valor}' en la hoja '{ws.title}'.")
+
+    ws.batch_update([
+        {"range": rowcol_to_a1(fila, encabezados.index(columna) + 1), "values": [[str(nuevo).strip()]]}
+        for columna, nuevo in cambios.items()
+    ])
+
+
+def obtener_proveedor(nit: str) -> dict | None:
+    """Datos actuales del proveedor (leídos del Sheet) o None si no existe."""
+    r = _registro_por_clave(_worksheet(HOJA_PROVEEDORES), "nit", nit)
+    if r is None:
+        return None
+    return {"id": str(r["nit"]).strip(), "nombre": str(r["nombre"]), "correo": str(r["correo"])}
+
+
+def actualizar_proveedor(nit: str, nombre: str, correo: str) -> None:
+    """Cambia el nombre y el correo de un proveedor (el NIT no se modifica)."""
+    _actualizar_fila(_worksheet(HOJA_PROVEEDORES), "nit", nit, {"nombre": nombre, "correo": correo})
+    cargar_proveedores.clear()
+
+
+def obtener_particular(identificacion: str) -> dict | None:
+    """Datos actuales del particular (leídos del Sheet) o None si no existe."""
+    r = _registro_por_clave(_hoja_particulares(), "identificacion", identificacion)
+    if r is None:
+        return None
+    return {"id": str(r["identificacion"]).strip(), "nombre": str(r["nombre"]), "correo": str(r["correo"])}
+
+
+def actualizar_particular(identificacion: str, nombre: str, correo: str) -> None:
+    """Cambia el nombre y el correo de un particular (la identificación no se modifica)."""
+    _actualizar_fila(_hoja_particulares(), "identificacion", identificacion, {"nombre": nombre, "correo": correo})
+    cargar_particulares.clear()

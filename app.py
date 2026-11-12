@@ -120,7 +120,7 @@ if not st.session_state.admin_autenticado:
 def _cerrar_sesion_admin():
     st.session_state.admin_autenticado = False
     for clave in list(st.session_state.keys()):
-        if clave.startswith("soportes") or clave == "revisar_envio":
+        if clave.startswith("soportes") or clave == "revisar_envio" or "_edit" in clave:
             del st.session_state[clave]
     if "admin_token" in st.query_params:
         del st.query_params["admin_token"]

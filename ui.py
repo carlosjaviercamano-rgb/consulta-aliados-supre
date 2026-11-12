@@ -48,9 +48,14 @@ def editor_registro(
     ss = st.session_state
     clave = f"{prefijo}_edit"
     ss.setdefault(f"{clave}_n", 0)
+    ss.setdefault(f"{clave}_buscar_n", 0)
+
+    aviso = ss.pop(f"{clave}_aviso", None)  # confirmación del último guardado
+    if aviso:
+        st.success(aviso)
 
     with st.form(f"{prefijo}_buscar"):
-        valor = st.text_input(etiqueta_busqueda)
+        valor = st.text_input(etiqueta_busqueda, key=f"{clave}_buscar_{ss[f'{clave}_buscar_n']}")
         buscar = st.form_submit_button("Buscar")
 
     if buscar:
@@ -88,5 +93,10 @@ def editor_registro(
                 ss.pop(clave, None)
                 st.error(f"Ese {etiqueta_id} ya no existe en el Sheet. Vuelve a buscarlo.")
             else:
-                registro["nombre"], registro["correo"] = nombre, correo
-                st.success("Datos actualizados correctamente.")
+                # Se cierra el formulario de edición y se vacía la búsqueda
+                ss.pop(clave, None)
+                ss[f"{clave}_buscar_n"] += 1
+                ss[f"{clave}_aviso"] = (
+                    f"Datos actualizados correctamente: {nombre} ({etiqueta_id} {registro['id']})."
+                )
+                st.rerun()

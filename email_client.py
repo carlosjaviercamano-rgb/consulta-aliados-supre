@@ -15,6 +15,11 @@ import pandas as pd
 import streamlit as st
 from openpyxl.utils import get_column_letter
 
+# Correo al que los destinatarios deben escribir para cualquier aclaración.
+# Cada tipo de correo tiene el suyo: cámbialo aquí si necesitas otro.
+CORREO_CONTACTO_FACTURAS = "otapia@supre.com.co"   # correo a los aliados (facturas)
+CORREO_CONTACTO_SOPORTES = "ccamano@supre.com.co"   # correo a los particulares (soportes)
+
 COLUMNAS_EXCEL = {
     "fecha_factura": "Fecha Factura",
     "factura_comision": "Factura Comisión",
@@ -99,7 +104,7 @@ def _armar_mensaje(remitente: str, cc: list[str], envio: dict) -> EmailMessage:
         f"  - Periodo de las facturas: {periodo}\n"
         f"  - Archivo adjunto: {nombre_archivo}\n\n"
         f"Si encuentra alguna diferencia o requiere una aclaración sobre la información, "
-        f"le agradecemos comunicarse con nosotros respondiendo a este mensaje.\n\n"
+        f"le agradecemos comunicarse con nosotros a través del correo {CORREO_CONTACTO_FACTURAS}.\n\n"
         f"Cordialmente,\n\n"
         f"Equipo Contable\n"
         f"Suprecredito SAS\n"
@@ -138,7 +143,8 @@ def _armar_mensaje(remitente: str, cc: list[str], envio: dict) -> EmailMessage:
           </table>
           <p style="margin:0 0 14px 0;">
             Si encuentra alguna diferencia o requiere una aclaración sobre la información,
-            le agradecemos comunicarse con nosotros respondiendo a este mensaje.
+            le agradecemos comunicarse con nosotros a través del correo
+            <a href="mailto:{CORREO_CONTACTO_FACTURAS}" style="color:#1e3a5f;">{CORREO_CONTACTO_FACTURAS}</a>.
           </p>
           <p style="margin:24px 0 0 0;">Cordialmente,</p>
           <p style="margin:12px 0 0 0;">
@@ -246,7 +252,7 @@ def _armar_mensaje_soporte(remitente: str, cc: list[str], envio: dict) -> EmailM
         f"  - Número de soportes adjuntos: {total}\n\n"
         f"Archivos adjuntos:\n{lista_txt}\n\n"
         f"Si requiere alguna aclaración sobre la información, "
-        f"le agradecemos comunicarse con nosotros respondiendo a este mensaje.\n\n"
+        f"le agradecemos comunicarse con nosotros a través del correo {CORREO_CONTACTO_SOPORTES}.\n\n"
         f"Cordialmente,\n\n"
         f"Equipo Contable\n"
         f"Suprecredito SAS\n"
@@ -283,7 +289,8 @@ def _armar_mensaje_soporte(remitente: str, cc: list[str], envio: dict) -> EmailM
           <ul style="margin:0 0 16px 18px; padding:0;">{lista_html}</ul>
           <p style="margin:0 0 14px 0;">
             Si requiere alguna aclaración sobre la información, le agradecemos
-            comunicarse con nosotros respondiendo a este mensaje.
+            comunicarse con nosotros a través del correo
+            <a href="mailto:{CORREO_CONTACTO_SOPORTES}" style="color:#1e3a5f;">{CORREO_CONTACTO_SOPORTES}</a>.
           </p>
           <p style="margin:24px 0 0 0;">Cordialmente,</p>
           <p style="margin:12px 0 0 0;">

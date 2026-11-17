@@ -12,6 +12,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 import modulo_facturas
+import modulo_inicio
 import modulo_particulares
 
 st.set_page_config(
@@ -35,6 +36,14 @@ st.markdown(
     #GithubIcon {visibility: hidden;}
     .viewerBadge_container__1QSob {display: none;}
     .viewerBadge_link__1S137 {display: none;}
+
+    /* Tipografía y textura (mismo estilo de App Supre) */
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+    html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
+    [data-testid="stMain"] {
+        background-image: radial-gradient(circle, rgba(255,255,255,0.035) 1px, transparent 1px);
+        background-size: 22px 22px;
+    }
 
     /* Menú lateral */
     [data-testid="stSidebar"] {
@@ -85,6 +94,7 @@ st.markdown(
 )
 
 MODULOS = [
+    ("inicio", "🏠", "Inicio"),
     ("facturas", "📨", "Facturas Aliados"),
     ("particulares", "📎", "Soporte Particulares"),
 ]
@@ -127,7 +137,7 @@ def _cerrar_sesion_admin():
 
 
 if "modulo" not in st.session_state:
-    st.session_state.modulo = "facturas"
+    st.session_state.modulo = "inicio"
 
 # ---------- Menú lateral ----------
 with st.sidebar:
@@ -150,6 +160,17 @@ with st.sidebar:
         ):
             st.session_state.modulo = clave
             st.rerun()
+
+    st.markdown("---")
+    st.markdown("**SISTEMA**")
+    if st.button(
+        "⚙️  Configuración",
+        key="nav_config",
+        use_container_width=True,
+        type="primary" if st.session_state.modulo == "config" else "secondary",
+    ):
+        st.session_state.modulo = "config"
+        st.rerun()
 
 # Botón flotante para abrir/cerrar el menú lateral: como la barra de Streamlit
 # está oculta, este botón dispara por JavaScript el control nativo del sidebar.
@@ -197,7 +218,16 @@ components.html(
 )
 
 # ---------- Enrutador ----------
-if st.session_state.modulo == "particulares":
+modulo = st.session_state.modulo
+modulo_inicio.render_fondo(modulo)   # fondo de burbujas configurable (Configuración -> Página de inicio)
+
+if modulo == "inicio":
+    modulo_inicio.render(None, [(k, i, l) for k, i, l in MODULOS if k != "inicio"])
+elif modulo == "config":
+    from ui import encabezado
+    encabezado("⚙️", "Configuración", "Página de inicio y apariencia de la app")
+    modulo_inicio.render_configuracion()
+elif modulo == "particulares":
     modulo_particulares.render()
 else:
     modulo_facturas.render()

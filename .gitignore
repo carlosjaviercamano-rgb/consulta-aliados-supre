@@ -3,3 +3,5 @@ __pycache__/
 *.pyc
 venv/
 .venv/
+# Cola de soportes PDF (se guarda en disco, nunca va a git)
+.cola_soportes/

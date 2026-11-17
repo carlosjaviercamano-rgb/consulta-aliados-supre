@@ -5,7 +5,8 @@ Módulo Soporte Particulares.
   identificación y correo) en la hoja 'Particulares' del Google Sheet.
 - Pestaña "Adjuntar y enviar soportes": se van adjuntando PDF a cada
   particular (puede ser más de uno por particular) y al final un botón envía
-  un correo por particular con todos sus soportes.
+  un correo por particular con todos sus soportes. La lista de envío se
+  guarda en el disco del servidor (cola_disco.py) para que no se pierda al recargar.
 """
 
 import re
@@ -13,6 +14,7 @@ import re
 import pandas as pd
 import streamlit as st
 
+from cola_disco import AVISO_COLA, ColaSoportes
 from email_client import LIMITE_BYTES_ADJUNTOS, MESES_ES, enviar_soportes_particulares
 from sheets_client import (
     ESTADO_LISTO,
@@ -26,6 +28,7 @@ from ui import editor_registro, encabezado
 
 _REGEX_CORREO = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 _LIMITE_MB = LIMITE_BYTES_ADJUNTOS // 1024 // 1024
+COLA = ColaSoportes("particulares")  # la lista de envío vive en el disco del servidor
 
 
 def _correo_valido(correo: str) -> bool:
@@ -114,7 +117,6 @@ def _mostrar_mensajes_previos():
 
 def _adjuntar_y_enviar():
     ss = st.session_state
-    ss.setdefault("soportes", {})  # {identificacion: [{"nombre": str, "bytes": bytes}, ...]}
     ss.setdefault("soportes_uploader_n", 0)
     ss.setdefault("soportes_sel_n", 0)
 
@@ -132,7 +134,7 @@ def _adjuntar_y_enviar():
     st.subheader("1. Adjuntar soportes")
     st.caption(
         "Elige el particular, sube sus PDF (puedes subir varios) y agrégalos a la lista. "
-        "Repite con cada particular. La lista se conserva mientras no recargues la página."
+        "Repite con cada particular."
     )
     mes = st.selectbox(
         "Mes al que corresponden los intereses",
@@ -161,17 +163,7 @@ def _adjuntar_y_enviar():
         st.caption("Elige el mes y el particular para poder agregar los PDF.")
 
     if st.button("Agregar a la lista", disabled=not listo_para_agregar):
-        ident = opciones[elegido]
-        lista = ss.soportes.setdefault(ident, [])
-        existentes = {(a["nombre"], len(a["bytes"])) for a in lista}
-        repetidos = []
-        for f in archivos:
-            contenido = f.getvalue()
-            if (f.name, len(contenido)) in existentes:
-                repetidos.append(f.name)
-                continue
-            lista.append({"nombre": f.name, "bytes": contenido, "mes": mes})
-            existentes.add((f.name, len(contenido)))
+        repetidos = COLA.agregar(opciones[elegido], [(f.name, f.getvalue()) for f in archivos], mes)
         if repetidos:
             ss.soportes_aviso = "Ya estaban en la lista y no se agregaron de nuevo: " + ", ".join(repetidos)
         ss.soportes_uploader_n += 1  # limpia el cargador de archivos
@@ -181,16 +173,18 @@ def _adjuntar_y_enviar():
     # ---------- 2. Lista de envío ----------
     st.divider()
     st.subheader("2. Lista de envío")
+    st.caption(AVISO_COLA)
 
-    if not ss.soportes:
+    cola = COLA.leer()
+    if not cola:
         st.info("Aún no has adjuntado soportes.")
         return
 
     envios = []
     resumen = []
-    for ident, lista in ss.soportes.items():
+    for ident, lista in cola.items():
         particular = por_id.get(ident)
-        peso = sum(len(a["bytes"]) for a in lista)
+        peso = sum(a["peso"] for a in lista)
         if particular is None:
             nombre, correo = ident, ""
             estado = "Particular no encontrado en el Sheet"
@@ -227,35 +221,35 @@ def _adjuntar_y_enviar():
         )
 
     # Detalle de archivos por particular, con opción de quitar
-    for ident in sorted(ss.soportes, key=lambda i: str(por_id[i]["nombre"]).lower() if i in por_id else i):
-        lista = ss.soportes[ident]
+    for ident in sorted(cola, key=lambda i: str(por_id[i]["nombre"]).lower() if i in por_id else i):
+        lista = cola[ident]
         etiqueta = f"{por_id[ident]['nombre']} — {len(lista)} soporte(s)" if ident in por_id else f"{ident} — {len(lista)} soporte(s)"
         with st.expander(etiqueta):
-            for i, a in enumerate(lista):
+            for a in lista:
                 c1, c2 = st.columns([6, 1])
-                c1.write(f"📄 {a['nombre']}  ·  {MESES_ES.get(a.get('mes'), 'sin mes')}  ·  {len(a['bytes']) / 1024:.0f} KB")
-                if c2.button("Quitar", key=f"quitar_{ident}_{i}"):
-                    lista.pop(i)
-                    if not lista:
-                        del ss.soportes[ident]
+                c1.write(f"📄 {a['nombre']}  ·  {MESES_ES.get(a.get('mes'), 'sin mes')}  ·  {a['peso'] / 1024:.0f} KB")
+                if c2.button("Quitar", key=f"quitar_{ident}_{a['id']}"):
+                    COLA.quitar(ident, a["id"])
                     st.rerun()
 
     # ---------- 3. Enviar ----------
     b1, b2 = st.columns([3, 1])
     enviar = b1.button(f"Enviar {len(envios)} correos", type="primary", disabled=not envios)
     if b2.button("Vaciar lista"):
-        ss.soportes = {}
+        COLA.vaciar()
         st.rerun()
 
     if enviar:
         with st.spinner("Enviando correos..."):
-            resultados = enviar_soportes_particulares(envios)
+            resultados = enviar_soportes_particulares(
+                [{**e, "archivos": COLA.con_bytes(e["archivos"])} for e in envios]
+            )
 
         ok = [e for e in envios if resultados.get(e["identificacion"], (False, ""))[0]]
         fallidos = [e for e in envios if not resultados.get(e["identificacion"], (False, ""))[0]]
 
         for e in ok:
-            ss.soportes.pop(e["identificacion"], None)
+            COLA.quitar_destinatario(e["identificacion"])
 
         ss.soportes_resultado = {
             "ok": [e["nombre"] for e in ok],

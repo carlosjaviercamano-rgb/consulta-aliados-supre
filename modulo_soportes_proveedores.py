@@ -7,14 +7,15 @@ Módulo Soportes Proveedores (gastos fijos mensuales).
   proveedor (puede ser más de uno) y al final un botón envía un correo por
   proveedor con todos sus soportes de pago.
 
-Es una copia adaptada de Soporte Particulares; sus claves de sesión empiezan
-por "soportesprov" para no mezclarse con las de particulares (y se limpian
-igual al cerrar sesión, porque empiezan por "soportes").
+Es una copia adaptada de Soporte Particulares. La lista de envío se guarda en
+el disco del servidor (cola_disco.py, cola "proveedores") para que no se pierda
+al recargar; sus claves de sesión empiezan por "soportesprov".
 """
 
 import pandas as pd
 import streamlit as st
 
+from cola_disco import AVISO_COLA, ColaSoportes
 from email_client import LIMITE_BYTES_ADJUNTOS, MESES_ES, enviar_soportes_proveedores
 from sheets_client import (
     ESTADO_LISTO,
@@ -28,6 +29,7 @@ from ui import correo_valido, editor_registro, encabezado
 
 _LIMITE_MB = LIMITE_BYTES_ADJUNTOS // 1024 // 1024
 _P = "soportesprov"  # prefijo de las claves de sesión de este módulo
+COLA = ColaSoportes("proveedores")  # la lista de envío vive en el disco del servidor
 
 
 def render():
@@ -112,10 +114,8 @@ def _mostrar_mensajes_previos():
 
 def _adjuntar_y_enviar():
     ss = st.session_state
-    ss.setdefault(_P, {})  # {nit: [{"nombre": str, "bytes": bytes, "mes": int}, ...]}
     ss.setdefault(f"{_P}_uploader_n", 0)
     ss.setdefault(f"{_P}_sel_n", 0)
-    cola = ss[_P]
 
     _mostrar_mensajes_previos()
 
@@ -131,7 +131,7 @@ def _adjuntar_y_enviar():
     st.subheader("1. Adjuntar soportes")
     st.caption(
         "Elige el mes y el proveedor, sube sus PDF (puedes subir varios) y agrégalos a la lista. "
-        "Repite con cada proveedor. La lista se conserva mientras no recargues la página."
+        "Repite con cada proveedor."
     )
     mes = st.selectbox(
         "Mes al que corresponde el pago",
@@ -160,19 +160,7 @@ def _adjuntar_y_enviar():
         st.caption("Elige el mes y el proveedor para poder agregar los PDF.")
 
     if st.button("Agregar a la lista", key=f"{_P}_btn_agregar", disabled=not listo_para_agregar):
-        nit = opciones[elegido]
-        lista = cola.setdefault(nit, [])
-        existentes = {(a["nombre"], len(a["bytes"])) for a in lista}
-        repetidos = []
-        for f in archivos:
-            contenido = f.getvalue()
-            if (f.name, len(contenido)) in existentes:
-                repetidos.append(f.name)
-                continue
-            lista.append({"nombre": f.name, "bytes": contenido, "mes": mes})
-            existentes.add((f.name, len(contenido)))
-        if not lista:
-            del cola[nit]
+        repetidos = COLA.agregar(opciones[elegido], [(f.name, f.getvalue()) for f in archivos], mes)
         if repetidos:
             ss[f"{_P}_aviso"] = "Ya estaban en la lista y no se agregaron de nuevo: " + ", ".join(repetidos)
         ss[f"{_P}_uploader_n"] += 1  # limpia el cargador de archivos
@@ -182,7 +170,9 @@ def _adjuntar_y_enviar():
     # ---------- 2. Lista de envío ----------
     st.divider()
     st.subheader("2. Lista de envío")
+    st.caption(AVISO_COLA)
 
+    cola = COLA.leer()
     if not cola:
         st.info("Aún no has adjuntado soportes.")
         return
@@ -191,7 +181,7 @@ def _adjuntar_y_enviar():
     resumen = []
     for nit, lista in cola.items():
         proveedor = por_nit.get(nit)
-        peso = sum(len(a["bytes"]) for a in lista)
+        peso = sum(a["peso"] for a in lista)
         if proveedor is None:
             nombre, correo = nit, ""
             estado = "Proveedor no encontrado en el Sheet"
@@ -232,31 +222,31 @@ def _adjuntar_y_enviar():
         lista = cola[nit]
         titulo = por_nit[nit]["nombre"] if nit in por_nit else nit
         with st.expander(f"{titulo} — {len(lista)} soporte(s)"):
-            for i, a in enumerate(lista):
+            for a in lista:
                 c1, c2 = st.columns([6, 1])
-                c1.write(f"📄 {a['nombre']}  ·  {MESES_ES.get(a.get('mes'), 'sin mes')}  ·  {len(a['bytes']) / 1024:.0f} KB")
-                if c2.button("Quitar", key=f"{_P}_quitar_{nit}_{i}"):
-                    lista.pop(i)
-                    if not lista:
-                        del cola[nit]
+                c1.write(f"📄 {a['nombre']}  ·  {MESES_ES.get(a.get('mes'), 'sin mes')}  ·  {a['peso'] / 1024:.0f} KB")
+                if c2.button("Quitar", key=f"{_P}_quitar_{nit}_{a['id']}"):
+                    COLA.quitar(nit, a["id"])
                     st.rerun()
 
     # ---------- 3. Enviar ----------
     b1, b2 = st.columns([3, 1])
     enviar = b1.button(f"Enviar {len(envios)} correos", type="primary", disabled=not envios, key=f"{_P}_btn_enviar")
     if b2.button("Vaciar lista", key=f"{_P}_btn_vaciar"):
-        ss[_P] = {}
+        COLA.vaciar()
         st.rerun()
 
     if enviar:
         with st.spinner("Enviando correos..."):
-            resultados = enviar_soportes_proveedores(envios)
+            resultados = enviar_soportes_proveedores(
+                [{**e, "archivos": COLA.con_bytes(e["archivos"])} for e in envios]
+            )
 
         ok = [e for e in envios if resultados.get(e["nit"], (False, ""))[0]]
         fallidos = [e for e in envios if not resultados.get(e["nit"], (False, ""))[0]]
 
         for e in ok:
-            cola.pop(e["nit"], None)
+            COLA.quitar_destinatario(e["nit"])
 
         ss[f"{_P}_resultado"] = {
             "ok": [e["nombre"] for e in ok],

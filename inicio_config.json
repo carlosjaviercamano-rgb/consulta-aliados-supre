@@ -1,0 +1,28 @@
+{
+  "titulo": "Bienvenido a Supre Aliados",
+  "mensaje": "Envío de facturas y soportes por correo a aliados y particulares. Elige un módulo en el menú lateral para empezar.",
+  "mostrar_accesos": true,
+  "carrusel_segundos": 6,
+  "imagenes": [
+    {
+      "archivo": "img_20261112194401773210_como-usar-claude-1.jpg",
+      "titulo": "",
+      "texto": ""
+    },
+    {
+      "archivo": "img_20261112194401854836_como-usar-claude-2.jpg",
+      "titulo": "",
+      "texto": ""
+    },
+    {
+      "archivo": "img_20261112194401899569_como-usar-claude-3.jpg",
+      "titulo": "",
+      "texto": ""
+    },
+    {
+      "archivo": "img_20261112194401938158_como-usar-claude-4.jpg",
+      "titulo": "",
+      "texto": ""
+    }
+  ]
+}

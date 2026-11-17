@@ -19,6 +19,7 @@ from openpyxl.utils import get_column_letter
 # Cada tipo de correo tiene el suyo: cámbialo aquí si necesitas otro.
 CORREO_CONTACTO_FACTURAS = "otapia@supre.com.co"   # correo a los aliados (facturas)
 CORREO_CONTACTO_SOPORTES = "ccamano@supre.com.co"   # correo a los particulares (soportes)
+CORREO_CONTACTO_PROVEEDORES = "ccamano@supre.com.co"   # correo a proveedores de gastos fijos (soportes)
 
 COLUMNAS_EXCEL = {
     "fecha_factura": "Fecha Factura",
@@ -352,4 +353,148 @@ def enviar_soportes_particulares(envios: list[dict]) -> dict:
     except Exception as e:
         for envio in envios:
             resultados.setdefault(envio["identificacion"], (False, str(e)))
+    return resultados
+
+# ---------- Soportes de pago a proveedores de gastos fijos ----------
+
+def _frase_soportes_proveedor(archivos: list[dict]) -> str:
+    """
+    'el soporte de pago de su factura correspondiente al mes de octubre' /
+    'los soportes de pago de sus facturas correspondientes a los meses de
+    septiembre y octubre'. Concuerda en singular/plural con la cantidad de PDF.
+    """
+    total = len(archivos)
+    if total == 1:
+        base, corresp = "el soporte de pago de su factura", "correspondiente"
+    else:
+        base, corresp = "los soportes de pago de sus facturas", "correspondientes"
+
+    meses = sorted({a["mes"] for a in archivos if a.get("mes") in MESES_ES})
+    nombres = [MESES_ES[m].lower() for m in meses]
+    if not nombres:
+        return base
+    if len(nombres) == 1:
+        return f"{base} {corresp} al mes de {nombres[0]}"
+    return f"{base} {corresp} a los meses de " + ", ".join(nombres[:-1]) + " y " + nombres[-1]
+
+
+def _armar_mensaje_soporte_proveedor(remitente: str, cc: list[str], envio: dict) -> EmailMessage:
+    nombre = str(envio["nombre"]).strip()
+    nit = str(envio["nit"]).strip()
+    archivos = envio["archivos"]  # lista de {"nombre": str, "bytes": bytes, "mes": int}
+    total = len(archivos)
+    hoy = date.today()
+
+    msg = EmailMessage()
+    msg["Subject"] = f"Suprecredito | Soporte de pago | {hoy:%d/%m/%Y}"
+    msg["From"] = f"Suprecredito <{remitente}>"
+    msg["To"] = envio["correo"]
+    if cc:
+        msg["Cc"] = ", ".join(cc)
+
+    frase = _frase_soportes_proveedor(archivos)
+    lista_txt = "\n".join(f"  - {a['nombre']}" for a in archivos)
+    msg.set_content(
+        f"Estimado proveedor {nombre}:\n\n"
+        f"Reciba un cordial saludo de parte de Suprecredito.\n\n"
+        f"Adjuntamos {frase}, para su conocimiento y control.\n\n"
+        f"  - NIT: {nit}\n"
+        f"  - Número de soportes adjuntos: {total}\n\n"
+        f"Archivos adjuntos:\n{lista_txt}\n\n"
+        f"Si requiere alguna aclaración sobre la información, "
+        f"le agradecemos comunicarse con nosotros a través del correo {CORREO_CONTACTO_PROVEEDORES}.\n\n"
+        f"Cordialmente,\n\n"
+        f"Equipo Contable\n"
+        f"Suprecredito SAS\n"
+    )
+
+    lista_html = "".join(
+        f'<li style="margin:2px 0;">{html.escape(a["nombre"])}</li>' for a in archivos
+    )
+    html_cuerpo = f"""\
+<html>
+  <body style="margin:0; padding:0; background-color:#f4f6f8;">
+    <div style="max-width:620px; margin:0 auto; padding:24px; font-family:Arial, Helvetica, sans-serif; color:#1f2937; font-size:14px; line-height:1.6;">
+      <div style="background-color:#ffffff; border:1px solid #e5e7eb; border-radius:8px; overflow:hidden;">
+        <div style="background-color:#1e3a5f; color:#ffffff; padding:16px 24px; font-size:16px; font-weight:bold;">
+          Suprecredito
+        </div>
+        <div style="padding:24px;">
+          <p style="margin:0 0 14px 0;">Estimado proveedor <strong>{html.escape(nombre)}</strong>:</p>
+          <p style="margin:0 0 14px 0;">Reciba un cordial saludo de parte de Suprecredito.</p>
+          <p style="margin:0 0 14px 0;">
+            Adjuntamos {frase}, para su conocimiento y control.
+          </p>
+          <table style="border-collapse:collapse; margin:0 0 18px 0; width:100%;">
+            <tr>
+              <td style="padding:8px 12px; background-color:#f1f5f9; border:1px solid #e5e7eb; width:45%;"><strong>NIT</strong></td>
+              <td style="padding:8px 12px; border:1px solid #e5e7eb;">{html.escape(nit)}</td>
+            </tr>
+            <tr>
+              <td style="padding:8px 12px; background-color:#f1f5f9; border:1px solid #e5e7eb;"><strong>Número de soportes adjuntos</strong></td>
+              <td style="padding:8px 12px; border:1px solid #e5e7eb;">{total}</td>
+            </tr>
+          </table>
+          <p style="margin:0 0 6px 0;"><strong>Archivos adjuntos:</strong></p>
+          <ul style="margin:0 0 16px 18px; padding:0;">{lista_html}</ul>
+          <p style="margin:0 0 14px 0;">
+            Si requiere alguna aclaración sobre la información, le agradecemos
+            comunicarse con nosotros a través del correo
+            <a href="mailto:{CORREO_CONTACTO_PROVEEDORES}" style="color:#1e3a5f;">{CORREO_CONTACTO_PROVEEDORES}</a>.
+          </p>
+          <p style="margin:24px 0 0 0;">Cordialmente,</p>
+          <p style="margin:12px 0 0 0;">
+            <strong>Equipo Contable</strong><br>
+            Suprecredito SAS
+          </p>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>
+"""
+    msg.add_alternative(html_cuerpo, subtype="html")
+
+    for a in archivos:
+        msg.add_attachment(a["bytes"], maintype="application", subtype="pdf", filename=a["nombre"])
+    return msg
+
+
+def enviar_soportes_proveedores(envios: list[dict]) -> dict:
+    """
+    Envía un correo por proveedor de gastos fijos, con todos sus PDF adjuntos,
+    reutilizando una sola conexión a Gmail. Cada envío debe traer: nit, nombre,
+    correo y archivos (lista de {"nombre", "bytes", "mes"}).
+    Devuelve {nit: (ok, mensaje_de_error)}.
+    """
+    try:
+        remitente = st.secrets["gmail_address"]
+        clave_app = st.secrets["gmail_app_password"]
+        cc = list(st.secrets.get("cc_emails", []))
+    except KeyError as e:
+        return {env["nit"]: (False, f"Falta configurar {e} en secrets") for env in envios}
+
+    resultados: dict = {}
+    try:
+        contexto = ssl.create_default_context()
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=contexto) as server:
+            server.login(remitente, clave_app)
+            for envio in envios:
+                nit = envio["nit"]
+                peso = sum(len(a["bytes"]) for a in envio["archivos"])
+                if peso > LIMITE_BYTES_ADJUNTOS:
+                    resultados[nit] = (
+                        False,
+                        f"Los adjuntos pesan {peso / 1024 / 1024:.1f} MB y superan el límite "
+                        f"de {LIMITE_BYTES_ADJUNTOS // 1024 // 1024} MB por correo.",
+                    )
+                    continue
+                try:
+                    server.send_message(_armar_mensaje_soporte_proveedor(remitente, cc, envio))
+                    resultados[nit] = (True, "")
+                except Exception as e:
+                    resultados[nit] = (False, str(e))
+    except Exception as e:
+        for envio in envios:
+            resultados.setdefault(envio["nit"], (False, str(e)))
     return resultados

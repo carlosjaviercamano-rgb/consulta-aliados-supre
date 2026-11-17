@@ -4,6 +4,7 @@ Supre Aliados — envío de facturas y soportes por correo.
 Punto de entrada: login de administrador, menú lateral de módulos y enrutador.
   - Facturas Aliados:    modulo_facturas.py
   - Soporte Particulares: modulo_particulares.py
+  - Soportes Proveedores: modulo_soportes_proveedores.py
 """
 
 import hashlib
@@ -14,6 +15,7 @@ import streamlit.components.v1 as components
 import modulo_facturas
 import modulo_inicio
 import modulo_particulares
+import modulo_soportes_proveedores
 
 st.set_page_config(
     page_title="Supre Aliados",
@@ -97,6 +99,7 @@ MODULOS = [
     ("inicio", "🏠", "Inicio"),
     ("facturas", "📨", "Facturas Aliados"),
     ("particulares", "📎", "Soporte Particulares"),
+    ("proveedores_soportes", "🧾", "Soportes Proveedores"),
 ]
 
 
@@ -229,5 +232,7 @@ elif modulo == "config":
     modulo_inicio.render_configuracion()
 elif modulo == "particulares":
     modulo_particulares.render()
+elif modulo == "proveedores_soportes":
+    modulo_soportes_proveedores.render()
 else:
     modulo_facturas.render()

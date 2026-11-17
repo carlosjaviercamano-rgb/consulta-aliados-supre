@@ -43,11 +43,13 @@ CONFIG_POR_DEFECTO = {
 # Módulos donde puede aparecer el fondo de burbujas (Configuración queda siempre sin fondo para poder desactivarlo).
 MODULOS_FONDO = {
     "inicio": "Inicio", "facturas": "Facturas Aliados", "particulares": "Soporte Particulares",
+    "proveedores_soportes": "Soportes Proveedores",
 }
 
 DESCRIPCIONES = {
     "facturas":     "Facturas de comisión por correo a cada aliado, filtradas por NIT",
     "particulares": "Acta de particulares y envío de soportes adjuntos por correo",
+    "proveedores_soportes": "Proveedores de gastos fijos y envío mensual de sus soportes de pago",
 }
 
 

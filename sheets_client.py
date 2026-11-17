@@ -1,6 +1,7 @@
 """
 Cliente de Google Sheets para el envío de facturas a aliados.
-Centraliza la conexión y las operaciones sobre las hojas 'Facturas' y 'Proveedores'.
+Centraliza la conexión y las operaciones sobre las hojas Facturas, Proveedores,
+Particulares y ProveedoresGastos.
 
 La hoja Facturas necesita una columna llamada 'estado_envio' (valores:
 'por enviar' / 'enviado') para controlar qué ya se mandó por correo.
@@ -349,3 +350,61 @@ def actualizar_particular(identificacion: str, nombre: str, correo: str) -> None
     """Cambia el nombre y el correo de un particular (la identificación no se modifica)."""
     _actualizar_fila(_hoja_particulares(), "identificacion", identificacion, {"nombre": nombre, "correo": correo})
     cargar_particulares.clear()
+
+# ---------- Proveedores de gastos fijos (módulo Soportes Proveedores) ----------
+
+HOJA_PROVEEDORES_GASTOS = "ProveedoresGastos"
+COLUMNAS_PROVEEDORES_GASTOS = ["nit", "nombre", "correo", "fecha_alta"]
+
+
+def _hoja_proveedores_gastos():
+    """Devuelve la hoja 'ProveedoresGastos'; si no existe, la crea con sus encabezados."""
+    ss = get_spreadsheet()
+    try:
+        return ss.worksheet(HOJA_PROVEEDORES_GASTOS)
+    except gspread.exceptions.WorksheetNotFound:
+        ws = ss.add_worksheet(
+            title=HOJA_PROVEEDORES_GASTOS, rows=200, cols=len(COLUMNAS_PROVEEDORES_GASTOS)
+        )
+        ws.append_row(COLUMNAS_PROVEEDORES_GASTOS)
+        return ws
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def cargar_proveedores_gastos() -> pd.DataFrame:
+    """Lee los proveedores de gastos fijos registrados como DataFrame."""
+    registros = _hoja_proveedores_gastos().get_all_records(numericise_ignore=["all"])
+    df = pd.DataFrame(registros)
+    if df.empty:
+        df = pd.DataFrame(columns=COLUMNAS_PROVEEDORES_GASTOS)
+    df["nit"] = df["nit"].astype(str).str.strip()
+    return df
+
+
+def proveedor_gasto_existe(nit: str) -> bool:
+    nit = str(nit).strip()
+    df = cargar_proveedores_gastos()
+    return not df[df["nit"] == nit].empty
+
+
+def agregar_proveedor_gasto(nit: str, nombre: str, correo: str) -> None:
+    """Agrega un proveedor de gastos fijos a la hoja 'ProveedoresGastos'."""
+    from datetime import date
+
+    ws = _hoja_proveedores_gastos()
+    ws.append_row([str(nit).strip(), nombre.strip(), correo.strip(), date.today().isoformat()])
+    cargar_proveedores_gastos.clear()
+
+
+def obtener_proveedor_gasto(nit: str) -> dict | None:
+    """Datos actuales del proveedor de gastos (leídos del Sheet) o None si no existe."""
+    r = _registro_por_clave(_hoja_proveedores_gastos(), "nit", nit)
+    if r is None:
+        return None
+    return {"id": str(r["nit"]).strip(), "nombre": str(r["nombre"]), "correo": str(r["correo"])}
+
+
+def actualizar_proveedor_gasto(nit: str, nombre: str, correo: str) -> None:
+    """Cambia el nombre y el correo de un proveedor de gastos (el NIT no se modifica)."""
+    _actualizar_fila(_hoja_proveedores_gastos(), "nit", nit, {"nombre": nombre, "correo": correo})
+    cargar_proveedores_gastos.clear()

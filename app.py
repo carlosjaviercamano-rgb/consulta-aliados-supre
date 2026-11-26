@@ -24,6 +24,29 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+# ---------- App en pausa (migración a App Supre) ----------
+# Se activa desde los Secrets de Streamlit Cloud con:  APP_EN_PAUSA = true
+# Para reactivar la app basta con ponerlo en false (o borrar la línea).
+_pausa = st.secrets.get("APP_EN_PAUSA", False)
+if str(_pausa).strip().lower() in ("true", "1", "si", "sí", "yes"):
+    st.markdown(
+        """
+        <style>
+        [data-testid="stSidebar"], [data-testid="stSidebarCollapsedControl"] {display: none;}
+        header[data-testid="stHeader"] {background: transparent;}
+        #MainMenu, footer {visibility: hidden;}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.title("🛠️ Supre Aliados en pausa")
+    st.info(
+        "Esta aplicación está temporalmente fuera de servicio mientras se "
+        "traslada a **App Supre**. Por favor ingresa a App Supre para enviar "
+        "facturas y soportes. Si necesitas ayuda, comunícate con Sistemas."
+    )
+    st.stop()
+
 st.markdown(
     """
     <style>
